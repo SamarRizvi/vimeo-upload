@@ -15,17 +15,8 @@
     </style>
   </head>
   <body>
-      <span id="signin">
-        <span
-          class="g-signin"
-          data-callback="signinCallback"
-          data-clientid="692008307570.apps.googleusercontent.com"
-          data-cookiepolicy="single_host_origin"
-          data-scope="https://www.googleapis.com/auth/drive.file">
-        </span>
-      </span>
-
-      <div id="drop_zone" style="display:none;">Drop files here</div>
+     
+      <div id="drop_zone">Drop files here</div>
      
      <div id="results"/>
      <script src="upload.js"></script>
@@ -33,17 +24,6 @@
      
        var accessToken = null;
        
-       /**
-        * Callback for G+ Sign-in. Swaps views if login successful.
-        */
-       function signinCallback(result) {
-           if(result.access_token) {
-               accessToken = result.access_token;
-               document.getElementById('signin').style.display = 'none';
-               document.getElementById('drop_zone').style.display = null;
-           }
-       }
- 
        /**
         * Called when files are dropped on to the drop target. For each file,
         * uploads the content to Drive & displays the results when complete.
@@ -88,8 +68,7 @@
        });
 
      </script>
-     <script src="https://apis.google.com/js/client:plusone.js"></script>
-     
+
      <script>
         (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
         (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
