@@ -1,7 +1,9 @@
+
+
 /**
  * Helper for implementing retries with backoff. Initial retry
  * delay is 1 second, increasing by 2x (+jitter) for subsequent retries
- * 
+ *
  * @constructor
  */
 var RetryHandler = function() {
@@ -10,7 +12,7 @@ var RetryHandler = function() {
 };
 
 /**
- * Invoke the function after waiting 
+ * Invoke the function after waiting
  *
  * @param {function} fn Function to invoke
  */
@@ -72,6 +74,7 @@ RetryHandler.prototype.getRandomInt_ = function(min, max) {
  * @param {string} [options.contentType] Content-type, if overriding the type of the blob.
  * @param {object} [options.metadata] File metadata
  * @param {function} [options.onComplete] Callback for when upload is complete
+ * @param {function} [options.onProgress] Callback for status for the in-progress upload
  * @param {function} [options.onError] Callback if upload fails
  */
 var MediaUploader = function(options) {
@@ -84,23 +87,26 @@ var MediaUploader = function(options) {
   };
   this.token = options.token;
   this.onComplete = options.onComplete || noop;
+  this.onProgress = options.onProgress || noop;
   this.onError = options.onError || noop;
   this.offset = options.offset || 0;
   this.chunkSize = options.chunkSize || 0;
   this.retryHandler = new RetryHandler();
 
   this.url = options.url;
+
   if (!this.url) {
     var params = options.params || {};
-    params.uploadType = 'resumable';
-    this.url = this.buildUrl_(options.fileId, params);
+    // params.uploadType = 'resumable';
+    this.url = this.buildUrl_(options.fileId, params, options.baseUrl);
   }
-  this.httpMethod = this.fileId ? 'PUT' : 'POST';
+
+  this.httpMethod = options.fileId ? 'PUT' : 'POST';
 };
 
 /**
- * Initiate the upload.
- */ 
+ * Initiate the upload (Get vimeo ticket number and upload url)
+ */
 MediaUploader.prototype.upload = function() {
   var self = this;
   var xhr = new XMLHttpRequest();
@@ -108,27 +114,37 @@ MediaUploader.prototype.upload = function() {
   xhr.open(this.httpMethod, this.url, true);
   xhr.setRequestHeader('Authorization', 'Bearer ' + this.token);
   xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.setRequestHeader('X-Upload-Content-Length', this.file.size);
-  xhr.setRequestHeader('X-Upload-Content-Type', this.contentType);
 
   xhr.onload = function(e) {
-    var location = e.target.getResponseHeader('Location');
-    this.url = location;
-    this.sendFile_();
+    // get vimeo upload  url, user (for available quote), ticket id and complete url
+    if (e.target.status < 400) {
+      var response = JSON.parse(e.target.responseText);
+      this.url = response.upload_link_secure;
+      this.user = response.user;
+      this.ticket_id = response.ticket_id;
+      this.complete_url = "https://api.vimeo.com"+response.complete_uri;
+      this.sendFile_();
+    } else {
+      this.onUploadError_(e);
+    }
   }.bind(this);
+
   xhr.onerror = this.onUploadError_.bind(this);
-  xhr.send(JSON.stringify(this.metadata));
+  xhr.send(JSON.stringify({
+    type:'streaming'
+  }));
+
 };
 
 /**
  * Send the actual file content.
  *
  * @private
- */ 
+ */
 MediaUploader.prototype.sendFile_ = function() {
   var content = this.file;
   var end = this.file.size;
-  
+
   if (this.offset || this.chunkSize) {
     // Only bother to slice the file if we're either resuming or uploading in chunks
     if (this.chunkSize) {
@@ -136,12 +152,16 @@ MediaUploader.prototype.sendFile_ = function() {
     }
     content = content.slice(this.offset, end);
   }
-  
+
   var xhr = new XMLHttpRequest();
   xhr.open('PUT', this.url, true);
   xhr.setRequestHeader('Content-Type', this.contentType);
+  // xhr.setRequestHeader('Content-Length', this.file.size);
   xhr.setRequestHeader('Content-Range', "bytes " + this.offset + "-" + (end - 1) + "/" + this.file.size);
-  xhr.setRequestHeader('X-Upload-Content-Type', this.file.type);
+
+  if (xhr.upload) {
+    xhr.upload.addEventListener('progress', this.onProgress);
+  }
   xhr.onload = this.onContentUploadSuccess_.bind(this);
   xhr.onerror = this.onContentUploadError_.bind(this);
   xhr.send(content);
@@ -149,14 +169,17 @@ MediaUploader.prototype.sendFile_ = function() {
 
 /**
  * Query for the state of the file for resumption.
- * 
+ *
  * @private
- */ 
+ */
 MediaUploader.prototype.resume_ = function() {
   var xhr = new XMLHttpRequest();
   xhr.open('PUT', this.url, true);
   xhr.setRequestHeader('Content-Range', "bytes */" + this.file.size);
   xhr.setRequestHeader('X-Upload-Content-Type', this.file.type);
+  if (xhr.upload) {
+    xhr.upload.addEventListener('progress', this.onProgress);
+  }
   xhr.onload = this.onContentUploadSuccess_.bind(this);
   xhr.onerror = this.onContentUploadError_.bind(this);
   xhr.send();
@@ -168,28 +191,67 @@ MediaUploader.prototype.resume_ = function() {
  * @param {XMLHttpRequest} xhr Request object
  */
 MediaUploader.prototype.extractRange_ = function(xhr) {
- var range = xhr.getResponseHeader('Range');
- if (range) {
-   this.offset = parseInt(range.match(/\d+/g).pop(), 10) + 1;
- }
+  var range = xhr.getResponseHeader('Range');
+  if (range) {
+    this.offset = parseInt(range.match(/\d+/g).pop(), 10) + 1;
+  }
+};
+
+/**
+ * The final step is to call vimeo.videos.upload.complete to queue up 
+ * the video for transcoding. 
+ *
+ * If successful call 'onComplete'
+ *
+ * @private
+ */
+MediaUploader.prototype.complete_ = function() {
+
+  var xhr = new XMLHttpRequest();
+  xhr.open('DELETE', this.complete_url, true);
+  xhr.setRequestHeader('Authorization', 'Bearer ' + this.token);
+
+  xhr.onload = function(e) {
+
+    // Get the video location (videoId)
+    if (e.target.status < 400) {
+
+      var location = e.target.getResponseHeader('Location');
+
+      // Example of location: ' /videos/115365719', extract the video id only
+      var video_id = location.split('/').pop();
+
+      this.onComplete(video_id);
+
+    } else {
+      this.onCompleteError_(e);
+    }
+  }.bind(this);
+
+  xhr.onerror = this.onCompleteError_.bind(this);
+  xhr.send();
 };
 
 /**
  * Handle successful responses for uploads. Depending on the context,
  * may continue with uploading the next chunk of the file or, if complete,
- * invokes the caller's callback.
+ * invokes vimeo complete service.
  *
  * @private
  * @param {object} e XHR event
  */
 MediaUploader.prototype.onContentUploadSuccess_ = function(e) {
+  
   if (e.target.status == 200 || e.target.status == 201) {
-    this.onComplete(e.target.response);
+   
+    this.complete_();
+
   } else if (e.target.status == 308) {
     this.extractRange_(e.target);
     this.retryHandler.reset();
     this.sendFile_();
   }
+
 };
 
 /**
@@ -207,6 +269,15 @@ MediaUploader.prototype.onContentUploadError_ = function(e) {
   }
 };
 
+/**
+ * Handles errors for the complete request.
+ *
+ * @private
+ * @param {object} e XHR event
+ */
+MediaUploader.prototype.onCompleteError_ = function(e) {
+  this.onError(e.target.response); // TODO - Retries for initial upload
+};
 
 /**
  * Handles errors for the initial request.
@@ -219,12 +290,12 @@ MediaUploader.prototype.onUploadError_ = function(e) {
 };
 
 /**
-* Construct a query string from a hash/object
-*
-* @private
-* @param {object} [params] Key/value pairs for query string
-* @return {string} query string
-*/
+ * Construct a query string from a hash/object
+ *
+ * @private
+ * @param {object} [params] Key/value pairs for query string
+ * @return {string} query string
+ */
 MediaUploader.prototype.buildQuery_ = function(params) {
   params = params || {};
   return Object.keys(params).map(function(key) {
@@ -233,15 +304,15 @@ MediaUploader.prototype.buildQuery_ = function(params) {
 };
 
 /**
-* Build the drive upload URL
-*
-* @private
-* @param {string} [id] File ID if replacing
-* @param {object} [params] Query parameters
-* @return {string} URL
-*/
-MediaUploader.prototype.buildUrl_ = function(id, params) {
-  var url = 'https://www.googleapis.com/upload/drive/v2/files/';
+ * Build the drive upload URL
+ *
+ * @private
+ * @param {string} [id] File ID if replacing
+ * @param {object} [params] Query parameters
+ * @return {string} URL
+ */
+MediaUploader.prototype.buildUrl_ = function(id, params, baseUrl) {
+  var url = baseUrl || 'https://api.vimeo.com/me/videos';
   if (id) {
     url += id;
   }
@@ -251,6 +322,3 @@ MediaUploader.prototype.buildUrl_ = function(id, params) {
   }
   return url;
 };
-
-
-
