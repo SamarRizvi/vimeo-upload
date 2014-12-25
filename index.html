@@ -89,13 +89,34 @@
          evt.preventDefault();
          var files = evt.dataTransfer.files; // FileList object.
          var accessToken = document.getElementById("accessToken").value;
+         
+         // Clear the results div
+         var node = document.getElementById('results');
+         while (node.hasChildNodes()) node.removeChild(node.firstChild);
+
+         // Rest the progress bar
          updateProgress(0);
          
          var uploader = new MediaUploader({
              file: files[0],
              token: accessToken,
              onError: function(data) {
-                 console.log('Error');
+              var message = data;
+
+              // Assuming the error is raised by the Vimeo API, data will be
+              // a JSON string with error.message set. I am not 100% sure that's the
+              // only time onError will be raised, though.
+              try {
+                var errorResponse = JSON.parse(data);
+                message = errorResponse.error.message;
+              } finally {
+                
+                var element = document.createElement("div");
+                element.setAttribute('class', "alert alert-danger");
+                element.appendChild(document.createTextNode(message));
+                document.getElementById('results').appendChild(element);
+              }
+              
              },
              onProgress: function(data) {
                 updateProgress(data.loaded / data.total);
