@@ -101,22 +101,12 @@
              file: files[0],
              token: accessToken,
              onError: function(data) {
-              var message = data;
-console.log(message);
-              // Assuming the error is raised by the Vimeo API, data will be
-              // a JSON string with error.message set. I am not 100% sure that's the
-              // only time onError will be raised, though.
-              try {
-                var errorResponse = JSON.parse(data);
-                message = errorResponse.error.message;
-              } finally {
-                
+          
                 var element = document.createElement("div");
                 element.setAttribute('class', "alert alert-danger");
-                element.appendChild(document.createTextNode(message));
+                element.appendChild(document.createTextNode(data.error));
                 document.getElementById('results').appendChild(element);
-              }
-              
+             
              },
              onProgress: function(data) {
                 updateProgress(data.loaded / data.total);
