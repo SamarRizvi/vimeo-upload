@@ -101,10 +101,13 @@
              file: files[0],
              token: accessToken,
              onError: function(data) {
-          console.log(data.error);
+               
+                var errorResponse = JSON.parse(data);
+                message = errorResponse.error;
+
                 var element = document.createElement("div");
                 element.setAttribute('class', "alert alert-danger");
-                element.appendChild(document.createTextNode(data.error));
+                element.appendChild(document.createTextNode(message));
                 document.getElementById('results').appendChild(element);
              
              },
