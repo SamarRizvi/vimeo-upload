@@ -1,7 +1,8 @@
 # Vimeo Upload
 
 Helper code for uploading video files directly with vanilla Javascript (XHR/CORS) to your Vimeo account. 
-Try the [live version](http://googledrive.github.io/cors-upload-sample)
+
+Try the [live version](http://websemantics.github.io/vimeo-upload/)
 and drag & drop files to upload them to Vimeo.
 
 ## Usage
@@ -27,3 +28,4 @@ This code has only been tested for uploading videos and monitoring progress.
 ## ToDo
 
 Implement Pause / Resume
+
